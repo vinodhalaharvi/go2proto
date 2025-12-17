@@ -336,6 +336,12 @@ func (t *Transformer) transformType(goType parser.GoType, enumLookup map[string]
 			imports = append(imports, "google/protobuf/any.proto")
 			return
 		}
+		// External package type (not local) - map to Any
+		if v.Package != "" {
+			protoType = "google.protobuf.Any"
+			imports = append(imports, "google/protobuf/any.proto")
+			return
+		}
 		protoType = v.Name
 		return
 	case parser.InterfaceType:
