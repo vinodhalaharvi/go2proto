@@ -22,10 +22,11 @@ type GoPackage struct {
 
 // GoStruct represents a Go struct type.
 type GoStruct struct {
-	Name     string
-	Fields   []GoField
-	Comments []string
-	Tags     map[string]string
+	Name       string
+	Fields     []GoField
+	Comments   []string
+	Tags       map[string]string
+	TypeParams []string // Generic type parameters (e.g., ["T", "K", "V"])
 }
 
 // GoField represents a struct field.
@@ -195,7 +196,7 @@ func (p *Parser) extractPackage(pkg *packages.Package) GoPackage {
 
 						switch t := ts.Type.(type) {
 						case *ast.StructType:
-							goPkg.Structs = append(goPkg.Structs, p.extractStruct(ts.Name.Name, t, comments, tags, pkg))
+							goPkg.Structs = append(goPkg.Structs, p.extractStruct(ts.Name.Name, t, comments, tags, pkg, ts.TypeParams))
 						case *ast.InterfaceType:
 							goPkg.Interfaces = append(goPkg.Interfaces, p.extractInterface(ts.Name.Name, t, comments, tags, pkg))
 						case *ast.Ident, *ast.SelectorExpr:
@@ -222,8 +223,18 @@ func (p *Parser) extractPackage(pkg *packages.Package) GoPackage {
 	return goPkg
 }
 
-func (p *Parser) extractStruct(name string, st *ast.StructType, comments []string, tags map[string]string, pkg *packages.Package) GoStruct {
+func (p *Parser) extractStruct(name string, st *ast.StructType, comments []string, tags map[string]string, pkg *packages.Package, typeParams *ast.FieldList) GoStruct {
 	s := GoStruct{Name: name, Comments: comments, Tags: tags}
+
+	// Extract type parameter names
+	if typeParams != nil {
+		for _, field := range typeParams.List {
+			for _, name := range field.Names {
+				s.TypeParams = append(s.TypeParams, name.Name)
+			}
+		}
+	}
+
 	if st.Fields != nil {
 		for _, field := range st.Fields.List {
 			s.Fields = append(s.Fields, p.extractField(field, pkg)...)

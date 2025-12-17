@@ -1,1 +1,9 @@
 .idea/vcs.xml
+copilot.data.migration.agent.xml
+copilot.data.migration.ask.xml
+copilot.data.migration.ask2agent.xml
+copilot.data.migration.edit.xml
+go2proto.iml
+modules.xml
+vcs.xml
+workspace.xml

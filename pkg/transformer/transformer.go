@@ -217,6 +217,12 @@ func (t *Transformer) transformStruct(s parser.GoStruct, enumLookup map[string]b
 		return ProtoMonoid.Empty()
 	}
 
+	// Build type params lookup
+	typeParamsLookup := make(map[string]bool)
+	for _, tp := range s.TypeParams {
+		typeParamsLookup[tp] = true
+	}
+
 	msg := ProtoMessage{Name: s.Name, Comments: filterNonTagComments(s.Comments)}
 	var imports []string
 	fieldNum := 1
@@ -228,7 +234,7 @@ func (t *Transformer) transformStruct(s parser.GoStruct, enumLookup map[string]b
 		if f.Embedded {
 			continue
 		}
-		protoField, fieldImports := t.transformField(f, fieldNum, enumLookup)
+		protoField, fieldImports := t.transformField(f, fieldNum, enumLookup, typeParamsLookup)
 		if protoField.Name != "" {
 			msg.Fields = append(msg.Fields, protoField)
 			imports = append(imports, fieldImports...)
@@ -239,12 +245,12 @@ func (t *Transformer) transformStruct(s parser.GoStruct, enumLookup map[string]b
 	return Proto{Messages: []ProtoMessage{msg}, Imports: ct.Unique(imports)}
 }
 
-func (t *Transformer) transformField(f parser.GoField, num int, enumLookup map[string]bool) (ProtoField, []string) {
+func (t *Transformer) transformField(f parser.GoField, num int, enumLookup map[string]bool, typeParamsLookup map[string]bool) (ProtoField, []string) {
 	if tag := parseProtobufTag(f.Tag); tag != nil {
 		return *tag, nil
 	}
 
-	protoType, imports, repeated, _, mapKey, mapValue := t.transformType(f.Type, enumLookup)
+	protoType, imports, repeated, _, mapKey, mapValue := t.transformType(f.Type, enumLookup, typeParamsLookup)
 
 	optional := false
 	if _, ok := f.Type.(parser.PointerType); ok {
@@ -260,7 +266,7 @@ func (t *Transformer) transformField(f parser.GoField, num int, enumLookup map[s
 	}, imports
 }
 
-func (t *Transformer) transformType(goType parser.GoType, enumLookup map[string]bool) (protoType string, imports []string, repeated bool, isMap bool, mapKey string, mapValue string) {
+func (t *Transformer) transformType(goType parser.GoType, enumLookup map[string]bool, typeParamsLookup map[string]bool) (protoType string, imports []string, repeated bool, isMap bool, mapKey string, mapValue string) {
 	switch v := goType.(type) {
 	case parser.BasicType:
 		if mapping, ok := t.opts.TypeMappings[v.Name]; ok {
@@ -273,26 +279,26 @@ func (t *Transformer) transformType(goType parser.GoType, enumLookup map[string]
 		protoType = v.Name
 		return
 	case parser.PointerType:
-		return t.transformType(v.Elem, enumLookup)
+		return t.transformType(v.Elem, enumLookup, typeParamsLookup)
 	case parser.SliceType:
 		if basic, ok := v.Elem.(parser.BasicType); ok && basic.Name == "byte" {
 			protoType = "bytes"
 			return
 		}
-		innerType, innerImports, _, _, _, _ := t.transformType(v.Elem, enumLookup)
+		innerType, innerImports, _, _, _, _ := t.transformType(v.Elem, enumLookup, typeParamsLookup)
 		protoType = innerType
 		imports = innerImports
 		repeated = true
 		return
 	case parser.ArrayType:
-		innerType, innerImports, _, _, _, _ := t.transformType(v.Elem, enumLookup)
+		innerType, innerImports, _, _, _, _ := t.transformType(v.Elem, enumLookup, typeParamsLookup)
 		protoType = innerType
 		imports = innerImports
 		repeated = true
 		return
 	case parser.MapType:
-		keyType, keyImports, _, _, _, _ := t.transformType(v.Key, enumLookup)
-		valueType, valueImports, _, _, _, _ := t.transformType(v.Value, enumLookup)
+		keyType, keyImports, _, _, _, _ := t.transformType(v.Key, enumLookup, typeParamsLookup)
+		valueType, valueImports, _, _, _, _ := t.transformType(v.Value, enumLookup, typeParamsLookup)
 		isMap = true
 		mapKey = keyType
 		mapValue = valueType
@@ -323,6 +329,12 @@ func (t *Transformer) transformType(goType parser.GoType, enumLookup map[string]
 				imports = append(imports, "google/protobuf/duration.proto")
 				return
 			}
+		}
+		// Check if it's a type parameter from the struct's generic definition
+		if typeParamsLookup != nil && typeParamsLookup[v.Name] {
+			protoType = "google.protobuf.Any"
+			imports = append(imports, "google/protobuf/any.proto")
+			return
 		}
 		protoType = v.Name
 		return
@@ -423,7 +435,7 @@ func (t *Transformer) transformMethod(m parser.GoMethod, serviceName string) (Pr
 func (t *Transformer) generateRequestMessage(methodName string, params []parser.GoParam) *ProtoMessage {
 	msg := &ProtoMessage{Name: methodName + "Request"}
 	for i, p := range params {
-		protoType, _, repeated, isMap, mapKey, mapValue := t.transformType(p.Type, nil)
+		protoType, _, repeated, isMap, mapKey, mapValue := t.transformType(p.Type, nil, nil)
 		name := p.Name
 		if name == "" {
 			name = fmt.Sprintf("arg%d", i+1)
@@ -441,7 +453,7 @@ func (t *Transformer) generateRequestMessage(methodName string, params []parser.
 func (t *Transformer) generateResponseMessage(methodName string, results []parser.GoParam) *ProtoMessage {
 	msg := &ProtoMessage{Name: methodName + "Response"}
 	for i, r := range results {
-		protoType, _, repeated, isMap, mapKey, mapValue := t.transformType(r.Type, nil)
+		protoType, _, repeated, isMap, mapKey, mapValue := t.transformType(r.Type, nil, nil)
 		name := r.Name
 		if name == "" {
 			name = fmt.Sprintf("result%d", i+1)
